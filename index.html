@@ -1,0 +1,378 @@
+<!--
+    Document Title: Smoothed Radar Chart
+
+    Description:
+    This HTML document creates a dynamic, interactive radar chart visualizing multi-dimensional data, ideal for comparing several quantitative variables. It's implemented using D3.js, a powerful visualization library, with data processing supported by PapaParse and Lodash for handling CSV data and grouping operations, respectively.
+
+    Structure:
+    - The head section loads necessary styles and scripts, including Google Fonts, D3.js, PapaParse for CSV parsing, and Lodash for data manipulation.
+    - The body section includes descriptive titles and div elements that serve as containers for the radar charts. These are styled to align next to each other using inline-flex display.
+
+    Styling:
+    - Basic body styles for font, text alignment, and interaction settings.
+    - Custom styles for headings (h7 and h1) to differentiate sections of the visualization.
+
+    JavaScript:
+    - The RadarChart function defines the logic to construct a radar chart given a parent container, data, and configuration options.
+    - It dynamically creates SVG elements, applies D3.js methods for data-driven transformations, and integrates interactive features such as tooltips.
+    - processData function is responsible for fetching and preparing the data from a CSV file, then rendering the radar chart using this data.
+
+    Usage:
+    - To view the radar charts, open this HTML file in a web browser.
+    - Hover over elements within the radar chart to see interactive tooltips that display additional information about the data points.
+
+    Note:
+    - Ensure all script sources are accessible and that the CSV data file ('shopping_behavior_updated.csv') is correctly located relative to the HTML file for successful data loading and visualization.
+-->
+
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta http-equiv="Content-Type" content="text/html;charset=utf-8" />
+    <title>Smoothed Radar Chart</title>
+    <!-- Google fonts -->
+    <link href='http://fonts.googleapis.com/css?family=Open+Sans:400,300' rel='stylesheet' type='text/css'>
+    <link href='https://fonts.googleapis.com/css?family=Raleway' rel='stylesheet' type='text/css'>
+    <!-- D3.js -->
+    <script src="https://d3js.org/d3.v4.min.js" charset="utf-8"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js"></script>
+    <style>
+        body {
+            font-family: 'Open Sans', sans-serif;
+            font-size: 11px;
+            font-weight: 300;
+            fill: #242424;
+            text-align: center;
+            text-shadow: 0 1px 0 #fff, 1px 0 0 #fff, -1px 0 0 #fff, 0 -1px 0 #fff;
+            cursor: default;
+        }
+
+        h7 {
+            font-size: 40px;
+            font-weight: bold;
+        }
+
+        h1 {
+            font-size: 25px;
+            font-weight: bold;
+
+        }
+
+        .legend {
+            font-family: 'Raleway', sans-serif;
+            fill: #333333;
+        }
+    </style>
+</head>
+
+<body>
+    <div>
+        <h7>Seasonal Preferences for Shipping</h7>
+        <h1>Hover over the dots to view the count of customers who selected each shipping method, broken down by season.</h1>
+
+    </div>
+    <div class="radarChart" style="display: inline-flex;"></div>
+    <div class="radarChart2" style="display: inline-flex;"></div>
+    <script>
+        const RadarChart = function RadarChart(parent_selector, data, options) {
+            const wrap = (text, width) => {
+                text.each(function () {
+                    var text = d3.select(this),
+                        words = text.text().split(/\s+/).reverse(),
+                        word,
+                        line = [],
+                        lineNumber = 0,
+                        lineHeight = 1.4,
+                        y = text.attr("y"),
+                        x = text.attr("x"),
+                        dy = parseFloat(text.attr("dy")),
+                        tspan = text.text(null).append("tspan").attr("x", x).attr("y", y).attr("dy", dy + "em");
+                    while (word = words.pop()) {
+                        line.push(word);
+                        tspan.text(line.join(" "));
+                        if (tspan.node().getComputedTextLength() > width) {
+                            line.pop();
+                            tspan.text(line.join(" "));
+                            line = [word];
+                            tspan = text.append("tspan").attr("x", x).attr("y", y).attr("dy", ++lineNumber * lineHeight + dy + "em").text(word);
+                        }
+                    }
+                });
+            }
+            let cfg = {
+                w: 600, h: 600,
+                margin: { top: 20, right: 20, bottom: 20, left: 20 },
+                levels: 3,
+                maxValue: 180, minValue: 130,
+                labelFactor: 1.08,
+                wrapWidth: 60,
+                opacityArea: 0.35,
+                dotRadius: 4,
+                opacityCircles: 0.1,
+                strokeWidth: 2,
+                roundStrokes: false,
+                color: d3.scaleOrdinal(d3.schemeCategory10),
+                format: '.2%',
+                unit: '',
+                legend: true
+            };
+            if ('undefined' !== typeof options) {
+                for (var i in options) {
+                    if ('undefined' !== typeof options[i]) { cfg[i] = options[i]; }
+                }
+            }
+            let maxValue = 0;
+            for (let j = 0; j < data.length; j++) {
+                for (let i = 0; i < data[j].axes.length; i++) {
+                    data[j].axes[i]['id'] = data[j].name;
+                    if (data[j].axes[i]['value'] > maxValue) {
+                        maxValue = data[j].axes[i]['value'];
+                    }
+                }
+            }
+            maxValue = Math.max(cfg.maxValue, maxValue);
+            const allAxis = data[0].axes.map((i, j) => i.axis),
+                total = allAxis.length,
+                radius = Math.min(cfg.w / 2, cfg.h / 2),
+                Format = d3.format(cfg.format),
+                angleSlice = Math.PI * 2 / total;
+            const rScale = d3.scaleLinear().range([0, radius]).domain([cfg.minValue, maxValue]);
+            const parent = d3.select(parent_selector);
+            parent.select("svg").remove();
+            let svg = parent.append("svg")
+                .attr("width", cfg.w + cfg.margin.left + cfg.margin.right)
+                .attr("height", cfg.h + cfg.margin.top + cfg.margin.bottom)
+                .attr("class", "radar");
+            let g = svg.append("g")
+                .attr("transform", "translate(" + (cfg.w / 2 + cfg.margin.left) + "," + (cfg.h / 2 + cfg.margin.top) + ")");
+            let filter = g.append('defs').append('filter').attr('id', 'glow'),
+                feGaussianBlur = filter.append('feGaussianBlur').attr('stdDeviation', '2.5').attr('result', 'coloredBlur'),
+                feMerge = filter.append('feMerge'),
+                feMergeNode_1 = feMerge.append('feMergeNode').attr('in', 'coloredBlur'),
+                feMergeNode_2 = feMerge.append('feMergeNode').attr('in', 'SourceGraphic');
+            let axisGrid = g.append("g").attr("class", "axisWrapper");
+            axisGrid.selectAll(".levels")
+                .data(d3.range(1, (cfg.levels + 1)).reverse())
+                .enter()
+                .append("circle")
+                .attr("class", "gridCircle")
+                .attr("r", d => radius / cfg.levels * d)
+                .style("fill", "#CDCDCD")
+                .style("stroke", "#CDCDCD")
+                .style("fill-opacity", cfg.opacityCircles)
+                .style("filter", "url(#glow)");
+            axisGrid.selectAll(".axisLabel")
+                .data(d3.range(1, (cfg.levels + 1)).reverse())
+                .enter().append("text")
+                .attr("class", "axisLabel")
+                .attr("x", 4)
+                .attr("y", d => -d * radius / cfg.levels)
+                .attr("dy", "0.4em")
+                .style("font-size", "15px")
+                .style("font-weight", "bold")
+                .attr("fill", "#737373")
+                .text(d => Format(((maxValue - cfg.minValue) * d / cfg.levels) + cfg.minValue) + cfg.unit);
+            var axis = axisGrid.selectAll(".axis")
+                .data(allAxis)
+                .enter()
+                .append("g")
+                .attr("class", "axis");
+            axis.append("line")
+                .attr("x1", 0)
+                .attr("y1", 0)
+                .attr("x2", (d, i) => rScale(maxValue * 1.1) * Math.cos(angleSlice * i - Math.PI / 2))
+                .attr("y2", (d, i) => rScale(maxValue * 1.1) * Math.sin(angleSlice * i - Math.PI / 2))
+                .attr("class", "line")
+                .style("stroke", "white")
+                .style("stroke-width", "2px");
+            axis.append("text")
+                .attr("class", "legend")
+                .style("font-size", "20px")
+                .attr("text-anchor", "middle")
+                .attr("dy", "0.35em")
+                .attr("x", (d, i) => rScale(maxValue * cfg.labelFactor) * Math.cos(angleSlice * i - Math.PI / 2))
+                .attr("y", (d, i) => rScale(maxValue * cfg.labelFactor) * Math.sin(angleSlice * i - Math.PI / 2))
+                .text(d => d)
+                .call(wrap, cfg.wrapWidth);
+            const radarLine = d3.radialLine()
+                .curve(d3.curveLinearClosed)
+                .radius(d => rScale(d.value))
+                .angle((d, i) => i * angleSlice);
+            if (cfg.roundStrokes) {
+                radarLine.curve(d3.curveCardinalClosed)
+            }
+            const blobWrapper = g.selectAll(".radarWrapper")
+                .data(data)
+                .enter().append("g")
+                .attr("class", "radarWrapper");
+            blobWrapper
+                .append("path")
+                .attr("class", "radarArea")
+                .attr("d", d => radarLine(d.axes))
+                .style("fill", "none")
+                .style("fill-opacity", cfg.opacityArea)
+                .on('mouseover', function (d, i) {
+                    parent.selectAll(".radarArea")
+                        .transition().duration(200)
+                        .style("fill-opacity", 0.1);
+                    d3.select(this)
+                        .transition().duration(200)
+                        .style("fill-opacity", 0.7);
+                })
+                .on('mouseout', () => {
+                    parent.selectAll(".radarArea")
+                        .transition().duration(200)
+                        .style("fill-opacity", cfg.opacityArea);
+                });
+            blobWrapper.append("path")
+                .attr("class", "radarStroke")
+                .attr("d", function (d, i) { return radarLine(d.axes); })
+                .style("stroke-width", cfg.strokeWidth + "px")
+                .style("stroke", (d, i) => cfg.color(i))
+                .style("fill", "none")
+                .style("filter", "url(#glow)");
+            blobWrapper.selectAll(".radarCircle")
+                .data(d => d.axes)
+                .enter()
+                .append("circle")
+                .attr("class", "radarCircle")
+                .attr("r", cfg.dotRadius)
+                .attr("cx", (d, i) => rScale(d.value) * Math.cos(angleSlice * i - Math.PI / 2))
+                .attr("cy", (d, i) => rScale(d.value) * Math.sin(angleSlice * i - Math.PI / 2))
+                .style("fill", "#000000")
+                .style("fill-opacity", 0.8);
+            const tooltipGroup = g.append("g")
+                .attr("class", "tooltip")
+                .style("display", "none"); // Initially hidden
+
+            const tooltipRect = tooltipGroup.append("rect")
+                .attr("width", 140) // Set a fixed width or calculate based on text length
+                .attr("height", 20)
+                .attr("fill", "rgba(0,0,0,0.6)") // Semi-transparent black background
+                .attr("rx", 5) // Rounded corners
+                .attr("ry", 5);
+
+            const tooltipText = tooltipGroup.append("text")
+                .style("font-size", "12px")
+                .attr("fill", "#fff")
+                .attr("x", 5)
+                .attr("y", 15)
+                .style("text-shadow", "0px 0px 1px #fff");  // Adds a subtle white shadow to enhance legibility
+            const blobCircleWrapper = g.selectAll(".radarCircleWrapper")
+                .data(data)
+                .enter().append("g")
+                .attr("class", "radarCircleWrapper");
+            blobCircleWrapper.selectAll(".radarInvisibleCircle")
+                .data(d => d.axes)
+                .enter().append("circle")
+                .attr("class", "radarInvisibleCircle")
+                .attr("r", cfg.dotRadius * 1.5)
+                .attr("cx", (d, i) => rScale(d.value) * Math.cos(angleSlice * i - Math.PI / 2))
+                .attr("cy", (d, i) => rScale(d.value) * Math.sin(angleSlice * i - Math.PI / 2))
+                .style("fill", "none")
+                .style("pointer-events", "all")
+                .on("mouseover", function (d) {
+                    const x = this.cx.baseVal.value - 10;
+                    const y = this.cy.baseVal.value - 10;
+                    tooltipGroup
+                        .attr('transform', `translate(${x}, ${y})`) // Position the whole group
+                        .style('display', 'block');
+                    tooltipText.text("Number of customers: " + Format(d.value) + cfg.unit); // Set text
+                    // Optionally adjust rect width based on text width
+                    const textWidth = tooltipText.node().getBBox().width;
+                    tooltipRect.attr("width", textWidth + 10);
+                })
+                .on("mouseout", function () {
+                    tooltipGroup.style('display', 'none'); // Hide the group
+                });
+            const tooltip = g.append("text")
+                .attr("class", "tooltip")
+                .attr('x', 0)
+                .attr('y', 0)
+                .style("font-size", "12px")
+                .style('display', 'none')
+                .attr("text-anchor", "middle")
+                .attr("dy", "0.35em");
+            if (cfg.legend !== false) {
+                let legendZone = svg.append('g');
+                let names = data.map(el => el.name);
+                if (cfg.legend.title) {
+                    let title = legendZone.append("text")
+                        .attr("class", "title")
+                        .attr('transform', `translate(${cfg.margin.left},${cfg.margin.top})`)
+                        .attr("x", cfg.w / 2)
+                        .attr("y", 10)
+                        .attr("font-size", "16px")
+                        .attr("fill", "#404040")
+                        .text(cfg.legend.title);
+                }
+                let legend = legendZone.append("g")
+                    .attr("class", "legend")
+                    .attr("height", 100)
+                    .attr("width", 200)
+                    .attr('transform', `translate(${cfg.margin.left + 20},${cfg.margin.top - 70})`);
+                legend.selectAll('rect')
+                    .data(names)
+                    .enter()
+                    .append("rect")
+                    .attr("x", cfg.w - 65)
+                    .attr("y", (d, i) => 10 + i * 20)
+                    .attr("width", 10)
+                    .attr("height", 10)
+                    .style("fill", (d, i) => cfg.color(i));
+                legend.selectAll('text')
+                    .data(names)
+                    .enter()
+                    .append("text")
+                    .attr("x", cfg.w - 50)
+                    .attr("y", (d, i) => 19 + i * 20)
+                    .attr("font-size", "15px")
+                    .attr("fill", "#737373")
+                    .text(d => d);
+            }
+            return svg;
+        }
+        var margin = { top: 100, right: 200, bottom: 200, left: 200 },
+            width = Math.min(700, window.innerWidth / 4) - margin.left - margin.right,
+            height = Math.min(width, window.innerHeight - margin.top - margin.bottom);
+        var data;
+        async function processData() {
+            const response = await fetch('shopping_behavior_updated.csv');
+            const preData = await response.text();
+            let parsedData = Papa.parse(preData, { header: true }).data;
+            let groupedData = _.groupBy(parsedData, 'Season');
+            const customOrder = ['Summer', 'Fall', 'Winter', 'Spring'];
+            groupedData = _.mapKeys(groupedData, (value, key) => customOrder.indexOf(key));
+            const keyMapping = {
+                0: 'Summer',
+                1: 'Fall',
+                2: 'Winter',
+                3: 'Spring',
+            };
+            groupedData = _.mapKeys(groupedData, (value, key) => keyMapping[key]);
+            data = Object.keys(groupedData).map(season => {
+                let groupedByShippingType = _.groupBy(groupedData[season], 'Shipping Type');
+                let axes = Object.keys(groupedByShippingType).map(shippingType => {
+                    return { axis: shippingType, value: groupedByShippingType[shippingType].length };
+                });
+                return { name: season, axes: axes };
+            });
+            data.pop();
+            let svg_radar1 = RadarChart(".radarChart", data, radarChartOptions);
+        }
+        var radarChartOptions = {
+            w: 500,
+            h: 500,
+            margin: margin,
+            levels: 5,
+            roundStrokes: false,
+            color: d3.scaleOrdinal().range(["#FFF700", "#A612E5", "#2B47FF", "#27AC34"]),
+            format: '.0f'
+        };
+        processData();
+    </script>
+</body>
+
+</html>
